@@ -29,6 +29,7 @@ app.use(cors({
 app.use(express.json());
 
 let isConnected = false;
+let connectionPromise = null;
 
 app.get('/', (req, res) => {
   res.status(200).send('Backend server is running');
@@ -43,15 +44,34 @@ app.get('/api/health', (req, res) => {
 });
 
 async function connectDB() {
-  if (isConnected) return;
+  if (isConnected || mongoose.connection.readyState === 1) {
+    isConnected = true;
+    return;
+  }
+
+  if (connectionPromise) {
+    return connectionPromise;
+  }
+
   try {
     if (!process.env.MONGODB_URI) {
       throw new Error('MONGODB_URI is not defined in environment variables');
     }
-    await mongoose.connect(process.env.MONGODB_URI);
-    isConnected = true;
-    console.log('MongoDB connected successfully');
+
+    connectionPromise = mongoose.connect(process.env.MONGODB_URI, {
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 20000,
+      maxPoolSize: 10,
+      bufferCommands: false
+    }).then(() => {
+      isConnected = true;
+      console.log('MongoDB connected successfully');
+    });
+
+    await connectionPromise;
   } catch (error) {
+    connectionPromise = null;
+    isConnected = false;
     console.error('MongoDB connection error:', error.message);
     throw error;
   }
