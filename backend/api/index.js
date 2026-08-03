@@ -31,11 +31,7 @@ app.use(express.json());
 let isConnected = false;
 
 app.get('/', (req, res) => {
-  res.json({
-    message: 'Backend server is running',
-    status: 'ok',
-    database: isConnected ? 'connected' : 'connecting'
-  });
+  res.status(200).send('Backend server is running');
 });
 
 app.get('/api/health', (req, res) => {
@@ -61,11 +57,7 @@ async function connectDB() {
   }
 }
 
-app.use(async (req, res, next) => {
-  if (req.path === '/' || req.path === '/api/health') {
-    return next();
-  }
-
+const requireDatabaseConnection = async (req, res, next) => {
   try {
     await connectDB();
     next();
@@ -76,15 +68,15 @@ app.use(async (req, res, next) => {
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
-});
+};
 
 import authRoutes from '../routes/authRoutes.js';
 import invoiceRoutes from '../routes/invoiceRoutes.js';
 import clientRoutes from '../routes/clientRoutes.js';
 
-app.use('/api/auth', authRoutes);
-app.use('/api/invoices', invoiceRoutes);
-app.use('/api/clients', clientRoutes);
+app.use('/api/auth', requireDatabaseConnection, authRoutes);
+app.use('/api/invoices', requireDatabaseConnection, invoiceRoutes);
+app.use('/api/clients', requireDatabaseConnection, clientRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
