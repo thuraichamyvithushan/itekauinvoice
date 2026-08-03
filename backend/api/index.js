@@ -30,6 +30,22 @@ app.use(express.json());
 
 let isConnected = false;
 
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Backend server is running',
+    status: 'ok',
+    database: isConnected ? 'connected' : 'connecting'
+  });
+});
+
+app.get('/api/health', (req, res) => {
+  res.json({
+    message: 'Backend server is running',
+    status: 'ok',
+    database: isConnected ? 'connected' : 'connecting'
+  });
+});
+
 async function connectDB() {
   if (isConnected) return;
   try {
@@ -46,6 +62,10 @@ async function connectDB() {
 }
 
 app.use(async (req, res, next) => {
+  if (req.path === '/' || req.path === '/api/health') {
+    return next();
+  }
+
   try {
     await connectDB();
     next();
@@ -65,10 +85,6 @@ import clientRoutes from '../routes/clientRoutes.js';
 app.use('/api/auth', authRoutes);
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/clients', clientRoutes);
-
-app.get('/', (req, res) => {
-  res.send('Invoice Management System API');
-});
 
 app.use((req, res) => {
   res.status(404).json({
