@@ -1,10 +1,11 @@
 import express from 'express';
-import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import serverless from 'serverless-http';
+import mongoose from 'mongoose';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import authRoutes from '../routes/authRoutes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,7 +22,7 @@ if (missingEnvVars.length > 0) {
 const app = express();
 
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000', 'https://itekauinvoice.vercel.app/', process.env.FRONTEND_URL].filter(Boolean),
+  origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000', 'https://itekauinvoice.vercel.app', process.env.FRONTEND_URL].filter(Boolean),
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true,
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -30,18 +31,6 @@ app.use(express.json());
 
 let isConnected = false;
 let connectionPromise = null;
-
-app.get('/', (req, res) => {
-  res.status(200).send('Backend server is running');
-});
-
-app.get('/api/health', (req, res) => {
-  res.json({
-    message: 'Backend server is running',
-    status: 'ok',
-    database: isConnected ? 'connected' : 'connecting'
-  });
-});
 
 async function connectDB() {
   if (isConnected || mongoose.connection.readyState === 1) {
@@ -54,10 +43,6 @@ async function connectDB() {
   }
 
   try {
-    if (!process.env.MONGODB_URI) {
-      throw new Error('MONGODB_URI is not defined in environment variables');
-    }
-
     connectionPromise = mongoose.connect(process.env.MONGODB_URI, {
       serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 20000,
@@ -65,19 +50,19 @@ async function connectDB() {
       bufferCommands: false
     }).then(() => {
       isConnected = true;
-      console.log('MongoDB connected successfully');
+      console.log('MongoDB connected successfully for auth');
     });
 
     await connectionPromise;
   } catch (error) {
     connectionPromise = null;
     isConnected = false;
-    console.error('MongoDB connection error:', error.message);
+    console.error('MongoDB connection error (auth):', error.message);
     throw error;
   }
 }
 
-const requireDatabaseConnection = async (req, res, next) => {
+app.use(async (req, res, next) => {
   try {
     await connectDB();
     next();
@@ -88,27 +73,15 @@ const requireDatabaseConnection = async (req, res, next) => {
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
-};
+});
 
-import invoiceRoutes from '../routes/invoiceRoutes.js';
-import clientRoutes from '../routes/clientRoutes.js';
-
-app.use('/api/invoices', requireDatabaseConnection, invoiceRoutes);
-app.use('/api/clients', requireDatabaseConnection, clientRoutes);
+app.use('/api/auth', authRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
     message: `Path not found on Express: ${req.path}`,
-    suggestion: "Check your routes and method (POST/GET)"
+    suggestion: 'Check your auth route and method (POST/GET)'
   });
 });
-
-const PORT = process.env.PORT || 5000;
-
-if (process.env.NODE_ENV !== 'production') {
-  app.listen(PORT, () => {
-    console.log(`Server running locally on port ${PORT}`);
-  });
-}
 
 export default serverless(app);
