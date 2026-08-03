@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+@theme {
+    --color-primary: #f20000;
+    --color-secondary: #000000;
+    --font-inter: "Inter", system-ui, sans-serif;
+
+    /* Image-Matched Dark Theme Palette */
+    --color-surface-100: #000000;
+    --color-surface-200: #0a0a0b;
+    --color-surface-300: #161618;
+    --color-content-100: #ffffff;
+    --color-content-200: #a1a1aa;
+    --color-outline: #1f1f1f;
+
+    /* Compatibility aliases */
+    --color-dark-surface-100: #000000;
+    --color-dark-surface-200: #0a0a0b;
+    --color-dark-content-100: #ffffff;
+    --color-dark-content-200: #a1a1aa;
+    --color-dark-outline: #1f1f1f;
+}
+
+body {
+    @apply bg-surface-100 text-content-100 font-inter transition-all duration-300;
+}
+
+@layer base {
+
+    input,
+    textarea,
+    select {
+        @apply bg-surface-200/50 border-outline text-content-100 rounded-xl focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all backdrop-blur-sm;
+    }
+}
+
+.glass {
+    @apply bg-surface-200/80 backdrop-blur-xl border border-outline hover:border-slate-800 transition-all duration-300;
+}
+
+.no-print {
+    @media print {
+        display: none !important;
+    }
+}
+
+@media print {
+    body {
+        background-color: white !important;
+        color: black !important;
+    }
+}

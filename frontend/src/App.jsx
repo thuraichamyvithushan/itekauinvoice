@@ -1,0 +1,39 @@
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import Login from './pages/Login';
+import Register from './pages/Register';
+import Dashboard from './pages/Dashboard';
+import InvoiceForm from './pages/InvoiceForm';
+import InvoicePreview from './pages/InvoicePreview';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
+import Profile from './pages/Profile';
+
+const PrivateRoute = ({ children }) => {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="flex h-screen items-center justify-center">Loading...</div>;
+  return user ? children : <Navigate to="/login" />;
+};
+
+function App() {
+  return (
+    <AuthProvider>
+      <Router>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
+          <Route path="/invoices/new" element={<PrivateRoute><InvoiceForm /></PrivateRoute>} />
+          <Route path="/invoices/edit/:id" element={<PrivateRoute><InvoiceForm /></PrivateRoute>} />
+          <Route path="/invoices/view/:id" element={<PrivateRoute><InvoicePreview /></PrivateRoute>} />
+          <Route path="/profile" element={<PrivateRoute><Profile /></PrivateRoute>} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
+        </Routes>
+      </Router>
+    </AuthProvider>
+  );
+}
+
+export default App;
