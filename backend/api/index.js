@@ -21,7 +21,7 @@ if (missingEnvVars.length > 0) {
 const app = express();
 
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000', 'https://invoice-generator-fv3n.vercel.app', process.env.FRONTEND_URL].filter(Boolean),
+  origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000', 'https://itekauinvoice.vercel.app/', process.env.FRONTEND_URL].filter(Boolean),
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true,
   allowedHeaders: ['Content-Type', 'Authorization']
