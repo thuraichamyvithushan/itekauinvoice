@@ -1,9 +1,9 @@
 import Invoice from '../models/Invoice.js';
 import Client from '../models/Client.js';
-import { generatePdf, getInvoiceHtml } from '../utils/pdfGenerator.js';
 
 export const downloadInvoicePdf = async (req, res) => {
     try {
+        const { generatePdf, getInvoiceHtml } = await import('../utils/pdfGenerator.js');
         const invoice = await Invoice.findOne({ _id: req.params.id, userId: req.user._id }).populate('clientId');
         if (!invoice) {
             return res.status(404).json({ message: 'Invoice not found' });
