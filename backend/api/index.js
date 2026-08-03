@@ -60,15 +60,22 @@ async function connectDB() {
 
     connectionPromise = mongoose.connect(process.env.MONGODB_URI, {
       serverSelectionTimeoutMS: 5000,
+      connectTimeoutMS: 5000,
       socketTimeoutMS: 20000,
       maxPoolSize: 10,
+      family: 4,
       bufferCommands: false
     }).then(() => {
       isConnected = true;
       console.log('MongoDB connected successfully');
     });
 
-    await connectionPromise;
+    await Promise.race([
+      connectionPromise,
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('MongoDB connection timed out')), 7000);
+      })
+    ]);
   } catch (error) {
     connectionPromise = null;
     isConnected = false;

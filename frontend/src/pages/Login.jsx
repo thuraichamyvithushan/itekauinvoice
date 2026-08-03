@@ -20,7 +20,11 @@ const Login = () => {
             await login(email, password);
             navigate('/');
         } catch (err) {
-            setError(err.response?.data?.message || 'Invalid email or password');
+            if (err.code === 'ECONNABORTED') {
+                setError('Server took too long to respond. Please try again.');
+            } else {
+                setError(err.response?.data?.message || 'Invalid email or password');
+            }
         } finally {
             setLoading(false);
         }
