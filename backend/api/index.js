@@ -97,9 +97,11 @@ const requireDatabaseConnection = async (req, res, next) => {
   }
 };
 
+import authRoutes from '../routes/authRoutes.js';
 import invoiceRoutes from '../routes/invoiceRoutes.js';
 import clientRoutes from '../routes/clientRoutes.js';
 
+app.use('/api/auth', requireDatabaseConnection, authRoutes);
 app.use('/api/invoices', requireDatabaseConnection, invoiceRoutes);
 app.use('/api/clients', requireDatabaseConnection, clientRoutes);
 
