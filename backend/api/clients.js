@@ -1,91 +1,57 @@
-import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import serverless from 'serverless-http';
-import mongoose from 'mongoose';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import clientRoutes from '../routes/clientRoutes.js';
+import Client from '../models/Client.js';
+import { connectDB, handleOptions, parseJsonBody, requireAuthUser, setCorsHeaders } from './_lib/authHelpers.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+export default async function handler(req, res) {
+  const applyCors = setCorsHeaders(res);
+  applyCors(req.headers.origin);
 
-dotenv.config({ path: path.resolve(__dirname, '../.env') });
-
-const requiredEnvVars = ['MONGODB_URI', 'JWT_SECRET'];
-const missingEnvVars = requiredEnvVars.filter((name) => !process.env[name]);
-
-if (missingEnvVars.length > 0) {
-  throw new Error(`Missing required environment variables: ${missingEnvVars.join(', ')}`);
-}
-
-const app = express();
-
-app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000', 'https://itekauinvoice.vercel.app', process.env.FRONTEND_URL].filter(Boolean),
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  credentials: true,
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-app.use(express.json());
-
-let isConnected = false;
-let connectionPromise = null;
-
-async function connectDB() {
-  if (isConnected || mongoose.connection.readyState === 1) {
-    isConnected = true;
-    return;
+  if (req.method === 'OPTIONS') {
+    return handleOptions(req, res);
   }
 
-  if (connectionPromise) {
-    return connectionPromise;
-  }
-
-  connectionPromise = mongoose.connect(process.env.MONGODB_URI, {
-    serverSelectionTimeoutMS: 5000,
-    connectTimeoutMS: 5000,
-    socketTimeoutMS: 20000,
-    maxPoolSize: 10,
-    family: 4,
-    bufferCommands: false
-  }).then(() => {
-    isConnected = true;
-    console.log('MongoDB connected successfully for clients');
-  }).catch((error) => {
-    connectionPromise = null;
-    isConnected = false;
-    throw error;
-  });
-
-  await Promise.race([
-    connectionPromise,
-    new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('MongoDB connection timed out')), 7000);
-    })
-  ]);
-}
-
-app.use(async (req, res, next) => {
   try {
     await connectDB();
-    next();
+    const user = await requireAuthUser(req);
+    const pathname = new URL(req.url, `http://${req.headers.host}`).pathname;
+    const clientId = pathname.replace(/^\/api\/clients\/?/, '').replace(/\/$/, '');
+
+    if (!clientId) {
+      if (req.method === 'GET') {
+        const clients = await Client.find({ userId: user._id }).sort({ name: 1 });
+        return res.status(200).json(clients);
+      }
+
+      if (req.method === 'POST') {
+        const body = await parseJsonBody(req);
+        const client = new Client({
+          ...body,
+          userId: user._id
+        });
+        await client.save();
+        return res.status(201).json(client);
+      }
+
+      return res.status(405).json({ message: 'Method not allowed' });
+    }
+
+    if (req.method === 'PUT') {
+      const body = await parseJsonBody(req);
+      const client = await Client.findOneAndUpdate(
+        { _id: clientId, userId: user._id },
+        body,
+        { new: true }
+      );
+
+      if (!client) {
+        return res.status(404).json({ message: 'Client not found' });
+      }
+
+      return res.status(200).json(client);
+    }
+
+    return res.status(405).json({ message: 'Method not allowed' });
   } catch (error) {
-    res.status(500).json({
-      error: 'Database connection failed',
-      message: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
+    const status = error.message === 'No token provided' || error.message === 'User not found' ? 401 : 500;
+    return res.status(status).json({ message: status === 401 ? 'Please authenticate.' : error.message });
   }
-});
-
-app.use('/api/clients', clientRoutes);
-
-app.use((req, res) => {
-  res.status(404).json({
-    message: `Path not found on Express: ${req.path}`,
-    suggestion: 'Check your client route and method (POST/GET/PUT)'
-  });
-});
-
-export default serverless(app);
+}

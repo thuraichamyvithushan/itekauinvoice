@@ -1,91 +1,171 @@
-import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import serverless from 'serverless-http';
-import mongoose from 'mongoose';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import invoiceRoutes from '../routes/invoiceRoutes.js';
+import Invoice from '../models/Invoice.js';
+import Client from '../models/Client.js';
+import { connectDB, handleOptions, parseJsonBody, requireAuthUser, setCorsHeaders } from './_lib/authHelpers.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-dotenv.config({ path: path.resolve(__dirname, '../.env') });
-
-const requiredEnvVars = ['MONGODB_URI', 'JWT_SECRET'];
-const missingEnvVars = requiredEnvVars.filter((name) => !process.env[name]);
-
-if (missingEnvVars.length > 0) {
-  throw new Error(`Missing required environment variables: ${missingEnvVars.join(', ')}`);
+function getInvoiceSubpath(req) {
+  const pathname = new URL(req.url, `http://${req.headers.host}`).pathname;
+  return pathname.replace(/^\/api\/invoices\/?/, '').replace(/\/$/, '');
 }
 
-const app = express();
+export default async function handler(req, res) {
+  const applyCors = setCorsHeaders(res);
+  applyCors(req.headers.origin);
 
-app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000', 'https://itekauinvoice.vercel.app', process.env.FRONTEND_URL].filter(Boolean),
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  credentials: true,
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-app.use(express.json());
-
-let isConnected = false;
-let connectionPromise = null;
-
-async function connectDB() {
-  if (isConnected || mongoose.connection.readyState === 1) {
-    isConnected = true;
-    return;
+  if (req.method === 'OPTIONS') {
+    return handleOptions(req, res);
   }
 
-  if (connectionPromise) {
-    return connectionPromise;
-  }
-
-  connectionPromise = mongoose.connect(process.env.MONGODB_URI, {
-    serverSelectionTimeoutMS: 5000,
-    connectTimeoutMS: 5000,
-    socketTimeoutMS: 20000,
-    maxPoolSize: 10,
-    family: 4,
-    bufferCommands: false
-  }).then(() => {
-    isConnected = true;
-    console.log('MongoDB connected successfully for invoices');
-  }).catch((error) => {
-    connectionPromise = null;
-    isConnected = false;
-    throw error;
-  });
-
-  await Promise.race([
-    connectionPromise,
-    new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('MongoDB connection timed out')), 7000);
-    })
-  ]);
-}
-
-app.use(async (req, res, next) => {
   try {
     await connectDB();
-    next();
+    const user = await requireAuthUser(req);
+    const subpath = getInvoiceSubpath(req);
+
+    if (!subpath) {
+      if (req.method === 'GET') {
+        const url = new URL(req.url, `http://${req.headers.host}`);
+        const search = url.searchParams.get('search');
+        const query = { userId: user._id };
+
+        if (search) {
+          query.$or = [
+            { invoiceNumber: { $regex: search, $options: 'i' } },
+            { 'customerDetails.name': { $regex: search, $options: 'i' } }
+          ];
+        }
+
+        const invoices = await Invoice.find(query).sort({ createdAt: -1 }).populate('clientId');
+        return res.status(200).json(invoices);
+      }
+
+      if (req.method === 'POST') {
+        const {
+          invoiceNumber, invoiceDate, dueDate, reference,
+          customerDetails, items, companyDetails, paymentInstructions
+        } = await parseJsonBody(req);
+
+        const subtotal = items.reduce((acc, item) => acc + item.total, 0);
+        const totalAmount = subtotal;
+
+        let client = await Client.findOne({ userId: user._id, name: customerDetails.name });
+
+        if (!client) {
+          client = new Client({
+            ...customerDetails,
+            userId: user._id
+          });
+          await client.save();
+        } else {
+          Object.assign(client, customerDetails);
+          await client.save();
+        }
+
+        const invoice = new Invoice({
+          userId: user._id,
+          clientId: client._id,
+          invoiceNumber,
+          invoiceDate,
+          dueDate,
+          reference,
+          companyDetails,
+          customerDetails,
+          items,
+          subtotal,
+          totalAmount,
+          paymentInstructions
+        });
+
+        await invoice.save();
+        return res.status(201).json(invoice);
+      }
+
+      return res.status(405).json({ message: 'Method not allowed' });
+    }
+
+    if (subpath === 'delete/all') {
+      if (req.method !== 'DELETE') {
+        return res.status(405).json({ message: 'Method not allowed' });
+      }
+
+      await Invoice.deleteMany({ userId: user._id });
+      return res.status(200).json({ message: 'All invoices deleted successfully' });
+    }
+
+    const downloadMatch = subpath.match(/^([^/]+)\/download$/);
+    if (downloadMatch) {
+      if (req.method !== 'GET') {
+        return res.status(405).json({ message: 'Method not allowed' });
+      }
+
+      const invoice = await Invoice.findOne({ _id: downloadMatch[1], userId: user._id }).populate('clientId');
+      if (!invoice) {
+        return res.status(404).json({ message: 'Invoice not found' });
+      }
+
+      const { generatePdf, getInvoiceHtml } = await import('../utils/pdfGenerator.js');
+      const html = getInvoiceHtml(invoice);
+      const pdf = await generatePdf(html);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      return res.status(200).send(pdf);
+    }
+
+    const invoiceId = subpath;
+
+    if (req.method === 'GET') {
+      const invoice = await Invoice.findOne({ _id: invoiceId, userId: user._id }).populate('clientId');
+      if (!invoice) {
+        return res.status(404).json({ message: 'Invoice not found' });
+      }
+      return res.status(200).json(invoice);
+    }
+
+    if (req.method === 'PUT') {
+      const {
+        invoiceNumber, invoiceDate, dueDate, reference,
+        customerDetails, items, companyDetails, paymentInstructions, status
+      } = await parseJsonBody(req);
+
+      const subtotal = items.reduce((acc, item) => acc + item.total, 0);
+      const totalAmount = subtotal;
+
+      let client = await Client.findOne({ userId: user._id, name: customerDetails.name });
+      if (!client) {
+        client = new Client({ ...customerDetails, userId: user._id });
+        await client.save();
+      } else {
+        Object.assign(client, customerDetails);
+        await client.save();
+      }
+
+      const invoice = await Invoice.findOneAndUpdate(
+        { _id: invoiceId, userId: user._id },
+        {
+          clientId: client._id,
+          invoiceNumber, invoiceDate, dueDate, reference,
+          customerDetails, items, companyDetails, paymentInstructions,
+          subtotal, totalAmount, status
+        },
+        { new: true }
+      ).populate('clientId');
+
+      if (!invoice) {
+        return res.status(404).json({ message: 'Invoice not found' });
+      }
+
+      return res.status(200).json(invoice);
+    }
+
+    if (req.method === 'DELETE') {
+      const invoice = await Invoice.findOneAndDelete({ _id: invoiceId, userId: user._id });
+      if (!invoice) {
+        return res.status(404).json({ message: 'Invoice not found' });
+      }
+      return res.status(200).json({ message: 'Invoice deleted successfully' });
+    }
+
+    return res.status(405).json({ message: 'Method not allowed' });
   } catch (error) {
-    res.status(500).json({
-      error: 'Database connection failed',
-      message: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
+    const status = error.message === 'No token provided' || error.message === 'User not found' ? 401 : 500;
+    return res.status(status).json({ message: status === 401 ? 'Please authenticate.' : error.message });
   }
-});
-
-app.use('/api/invoices', invoiceRoutes);
-
-app.use((req, res) => {
-  res.status(404).json({
-    message: `Path not found on Express: ${req.path}`,
-    suggestion: 'Check your invoice route and method (POST/GET/PUT/DELETE)'
-  });
-});
-
-export default serverless(app);
+}
